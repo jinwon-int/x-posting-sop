@@ -1,0 +1,41 @@
+name: Content idea
+description: 스레드 토픽 제안 — 콘텐츠 백로그 항목 (토픽 1개 = 이슈 1개)
+title: "[idea] "
+labels: ["idea"]
+body:
+  - type: input
+    id: topic
+    attributes:
+      label: Topic
+      description: 한 줄 요약
+      placeholder: "예: Termux 셀프호스팅 노드의 메모리 한계와 우회법"
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - New
+        - Follow-up
+        - Series
+    validations:
+      required: true
+  - type: textarea
+    id: messages
+    attributes:
+      label: Key messages
+      description: 전달할 핵심 메시지 3–5개 (드래프트의 뼈대가 된다)
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source material
+      description: 근거가 되는 레포 / 문서 / 실제 경험
+      placeholder: "예: jinwon-int/agent-olympics README, 6/10 운영 로그"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: 훅 아이디어, 영상 필요 여부, 발행 희망 시점 등
