@@ -59,11 +59,49 @@ if [[ ${#NEW[@]} -gt 2 ]]; then
   exit 1
 fi
 
+# Resolve the video for a draft, rendering the source if needed.
+# Convention: drafts/YYYY-MM-DD-topic-en.md -> videos/YYYY-MM-DD-topic.mp4
+video_for() {
+  local topic="$1" src
+  if [[ ! -f "videos/$topic.mp4" ]]; then
+    for src in "videos/$topic.slides.txt" "videos/$topic.cast" "videos/$topic.tape"; do
+      if [[ -f "$src" ]]; then
+        scripts/render-video.sh "$src" >&2 || return 1
+        break
+      fi
+    done
+  fi
+  [[ -f "videos/$topic.mp4" ]] && echo "videos/$topic.mp4"
+  return 0
+}
+
 # Glob order is lexicographic, so YYYY-MM-DD-topic-en.md precedes -ko.md
-# (EN-first rule).
+# (EN-first rule). The EN upload's media id is reused for the KO thread
+# within the same run (X keeps media ids valid ~15 days).
+declare -A MEDIA_CACHE
 for f in "${NEW[@]}"; do
-  echo "=== Publishing $f ==="
-  scripts/publish-thread.sh "$f"
+  b=$(basename "$f" .md)
+  topic=${b%-en}; topic=${topic%-ko}
+
+  MEDIA_ARGS=()
+  VIDEO=$(video_for "$topic") || { echo "Error: video render failed for $topic — not publishing." >&2; exit 1; }
+  if [[ -n "$VIDEO" ]]; then
+    if [[ -z "${MEDIA_CACHE[$topic]:-}" ]]; then
+      UP=$(xurl media upload "$VIDEO")
+      MID=$(grep -oE '[0-9]{15,}' <<<"$UP" | head -1) || true
+      if [[ -z "$MID" ]]; then
+        echo "Error: could not parse media id from upload output — not publishing:" >&2
+        echo "$UP" >&2
+        exit 1
+      fi
+      MEDIA_CACHE[$topic]=$MID
+      echo "Uploaded $VIDEO (media id ${MID})"
+    fi
+    MEDIA_ARGS=(--media-id "${MEDIA_CACHE[$topic]}")
+  fi
+
+  echo "=== Publishing $f ${VIDEO:+(with $VIDEO)} ==="
+  scripts/publish-thread.sh "$f" ${MEDIA_ARGS[@]+"${MEDIA_ARGS[@]}"}
   echo "$f" >> "$STATE_FILE"
 done
 
