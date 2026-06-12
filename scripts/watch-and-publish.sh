@@ -69,16 +69,34 @@ done < <(list_drafts)
 [[ ${#NEW[@]} -eq 0 ]] && exit 0
 
 # Merge = approval (safety.md). A draft counts as approved only when the
-# commit that ADDED it is a PR merge — squash merges carry "(#N)" in the
-# subject, true merge commits have two parents. Drafts pushed straight to
-# main bypass owner review and are NEVER auto-published; route them through
-# a PR, or append them to the state file manually if handled out of band.
-APPROVED=()
-for f in "${NEW[@]}"; do
-  info=$(git log --diff-filter=A --format='%P%x09%s' -1 -- "$f")
+# commit that ADDED it belongs to a merged PR. Authoritative check via the
+# GitHub API when gh is available — this correctly recognizes squash,
+# merge, AND rebase merges. Without gh, falls back to commit heuristics
+# (squash subject "(#N)" or two parents), which cannot recognize rebase
+# merges — use squash merges if running heuristic-only. Drafts pushed
+# straight to main bypass owner review and are NEVER auto-published.
+commit_is_pr_merge() {
+  local sha="$1" merged
+  if command -v gh >/dev/null 2>&1; then
+    merged=$(gh api "repos/{owner}/{repo}/commits/$sha/pulls" \
+      --jq '[.[] | select(.merged_at != null)] | length' 2>/dev/null) || merged=""
+    if [[ "$merged" =~ ^[0-9]+$ ]]; then
+      [[ "$merged" -gt 0 ]]
+      return
+    fi
+    echo "Note: gh API check failed for $sha — falling back to commit heuristics." >&2
+  fi
+  local info parents subject
+  info=$(git log --format='%P%x09%s' -1 "$sha")
   parents=${info%%$'\t'*}
   subject=${info#*$'\t'}
-  if [[ "$subject" =~ \(#[0-9]+\)$ || "$parents" == *" "* ]]; then
+  [[ "$subject" =~ \(#[0-9]+\)$ || "$parents" == *" "* ]]
+}
+
+APPROVED=()
+for f in "${NEW[@]}"; do
+  sha=$(git log --diff-filter=A --format='%H' -1 -- "$f")
+  if commit_is_pr_merge "$sha"; then
     APPROVED+=("$f")
   else
     echo "WARNING: $f reached main without a PR merge (direct push?) — refusing to publish (safety.md)." >&2
