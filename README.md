@@ -291,18 +291,37 @@ scripts/publish-thread.sh <thread-file> [--media-id MEDIA_ID] [--delay SECONDS] 
 
 ## Auto-Publish on Merge
 
-`.github/workflows/publish-on-merge.yml` — drafts/에 파일을 추가하는 PR이
-**머지되면 그 머지를 승인 신호로 삼아** 자동 발행하는 워크플로. 승인·발행·
-기록이 전부 GitHub에서 일어난다.
+drafts/에 파일을 추가하는 PR이 **머지되면 그 머지를 승인 신호로 삼아** 자동
+발행한다. 승인·발행·기록이 전부 GitHub에서 일어난다. 구현 경로는 두 가지 —
+어느 쪽이든 파일명 정렬 순서로 발행되므로 `-en.md`가 `-ko.md`보다 먼저
+나간다(EN-first 규칙 자동 충족).
 
-**기본 비활성.** 활성화 조건 두 가지:
+### Route A: 폴링 스크립트 (Termux/Hermes 노드 권장)
 
-1. xurl 인증이 잡혀 있는 노드(Hermes/Termux)에 self-hosted runner 등록.
+GitHub Actions runner가 안 도는 환경(Android/Termux)을 위한 runner-free 방식.
+xurl 인증이 있는 노드에서:
+
+```bash
+# 1회: 기존 드래프트를 발행됨으로 표시 (이후 머지분만 발행됨)
+scripts/watch-and-publish.sh --init
+
+# cron 또는 잡 스케줄러로 5분마다:
+*/5 * * * * cd /path/to/x-posting-sop && scripts/watch-and-publish.sh
+```
+
+main에 새로 머지된 드래프트를 발견하면 발행하고 노드 로컬 상태 파일에
+기록한다. 한 번에 2개(하루 한도, safety.md) 초과분이 쌓여 있으면 발행을
+거부하고 수동 처리를 요구한다.
+
+### Route B: GitHub Actions (self-hosted runner가 가능한 환경)
+
+`.github/workflows/publish-on-merge.yml`. **기본 비활성.** 활성화 조건:
+
+1. xurl 인증이 잡혀 있는 노드에 self-hosted runner 등록.
 2. 레포 변수 `AUTO_PUBLISH=true` 설정 (Settings → Actions → Variables).
 
-파일명 정렬 순서로 발행되므로 `-en.md`가 `-ko.md`보다 먼저 나간다(EN-first
-규칙 자동 충족). 활성화 전까지는 머지 후 수동으로 `publish-thread.sh`를
-실행한다.
+두 경로를 동시에 켜면 중복 발행되므로 **하나만 선택**한다. 활성화 전까지는
+머지 후 수동으로 `publish-thread.sh`를 실행한다.
 
 ---
 

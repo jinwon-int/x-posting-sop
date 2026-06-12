@@ -5,6 +5,9 @@
 *token*.json
 .xurl/
 
+# Node-local auto-publish state (scripts/watch-and-publish.sh)
+.watch-published.list
+
 # Media artifacts (upload via xurl, don't version large binaries)
 *.mp4
 *.mov
