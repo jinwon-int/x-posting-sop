@@ -85,6 +85,13 @@ case "$name" in
 esac
 
 # Normalize to X spec: 720p letterbox, 30fps, H.264 yuv420p, no audio.
+# If the raw file is already at the output path (e.g. a tape that declares
+# Output videos/<base>.mp4), move it aside first — ffmpeg can't read and
+# write the same file.
+if [[ "$RAW" -ef "$OUT" ]]; then
+  mv "$RAW" "$TMP/inplace-raw.mp4"
+  RAW="$TMP/inplace-raw.mp4"
+fi
 ffmpeg -y -v error -i "$RAW" \
   -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,format=yuv420p" \
   -c:v libx264 -preset medium -crf 23 -movflags +faststart -an "$OUT"

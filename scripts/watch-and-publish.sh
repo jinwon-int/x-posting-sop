@@ -36,13 +36,22 @@ if [[ "${1:-}" == "--init" ]]; then
   exit 0
 fi
 
-# Sync to latest main; abort quietly if the tree isn't clean.
+# Sync to latest main; abort if tracked files are modified. Untracked files
+# are tolerated (locally rendered mp4s live in videos/), but if origin/main
+# now ships a CI-rendered mp4 with the same name, the CI version is
+# canonical — drop the local copy so the fast-forward can't collide.
 git fetch origin main --quiet
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "Error: working tree not clean — resolve manually before auto-publish." >&2
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  echo "Error: tracked files modified — resolve manually before auto-publish." >&2
   exit 1
 fi
 git checkout main --quiet
+while IFS= read -r f; do
+  if [[ -f "$f" ]] && ! git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+    echo "Replacing locally rendered $f with the CI-rendered version from main."
+    rm -f "$f"
+  fi
+done < <(git diff --name-only HEAD origin/main -- 'videos/*.mp4')
 git merge --ff-only origin/main --quiet
 
 NEW=()
