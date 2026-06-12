@@ -1,0 +1,83 @@
+# Render missing videos on main and commit the mp4s back.
+#
+# After a draft PR with a video source merges, this renders any source
+# (.slides.txt / .cast / .tape) that has no matching videos/<base>.mp4 and
+# commits the result to main. The node's poller (watch-and-publish.sh)
+# prefers an existing mp4 over rendering locally, so the Termux node never
+# needs vhs/agg — it just pulls the CI-rendered file and publishes.
+#
+# Loop guard: the bot commit only adds mp4s; the retriggered run finds no
+# missing sources and exits without committing.
+
+name: Render and commit videos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "videos/**"
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find sources missing an mp4
+        id: missing
+        run: |
+          MISSING=""
+          for src in videos/*.slides.txt videos/*.cast videos/*.tape; do
+            [ -e "$src" ] || continue
+            base=$(basename "$src")
+            for ext in .slides.txt .cast .tape; do base=${base%"$ext"}; done
+            [ -f "videos/$base.mp4" ] || MISSING="$MISSING$src"$'\n'
+          done
+          echo "Missing renders:"; echo "$MISSING"
+          {
+            echo 'files<<EOF'
+            printf '%s' "$MISSING"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install ffmpeg
+        if: steps.missing.outputs.files != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install vhs + ttyd (.tape sources)
+        if: contains(steps.missing.outputs.files, '.tape')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R charmbracelet/vhs -p '*Linux_x86_64.tar.gz' -O /tmp/vhs.tgz
+          tar -xzf /tmp/vhs.tgz -C /tmp
+          sudo mv "$(find /tmp -type f -name vhs | head -1)" /usr/local/bin/vhs
+          sudo curl -fsSL -o /usr/local/bin/ttyd \
+            https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
+          sudo chmod +x /usr/local/bin/ttyd /usr/local/bin/vhs
+
+      - name: Install agg (.cast sources)
+        if: contains(steps.missing.outputs.files, '.cast')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R asciinema/agg -p '*x86_64-unknown-linux-gnu' -O /tmp/agg
+          sudo install -m 755 /tmp/agg /usr/local/bin/agg
+
+      - name: Render and commit
+        if: steps.missing.outputs.files != ''
+        run: |
+          echo "${{ steps.missing.outputs.files }}" | while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            scripts/render-video.sh "$f"
+          done
+          if [ -n "$(git status --porcelain videos)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add videos/*.mp4
+            git commit -m "Render videos for publish (CI)"
+            git push
+          fi
