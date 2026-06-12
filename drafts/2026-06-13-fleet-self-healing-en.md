@@ -1,3 +1,9 @@
+<!--
+Re-approval of the 2026-06-12 fleet-self-healing thread (published without
+owner approval, deleted per incident response — see PR #12).
+Changes from the original: hashtag line normalized to the SOP primary set.
+-->
+
 1/5 — 11 VPS. Something breaks every week. Here's how a liberal arts grad keeps them running — without SSH'ing into a single server.
 
 ---
@@ -15,4 +21,5 @@
 ---
 
 5/5 — I'm not a sysadmin. I'm a liberal arts grad who built a system where AI agents diagnose, fix, and document their own problems. 11 nodes, zero SSH panic. Mostly.
-#BuildInPublic #AI #SelfTaught #DevOps #LiberalArtsAI
+
+#BuildInPublic #AgentOrch #DevOps
