@@ -34,7 +34,8 @@ Agent Olympics, A2A, Hermes/OpenClaw 비교, Termux/Android 셀프호스팅, 인
 | `log.md` | 발행 이력 (회차별 스레드 ID, 토픽, 비고) |
 | `templates/` | EN/KO 스레드 템플릿 — 복사해서 드래프트 시작 |
 | `drafts/` | 발행 전 드래프트. PR로 올려 오너 리뷰 → 승인 이력이 git에 남음 |
-| `scripts/` | 발행 자동화 (`publish-thread.sh`), 메트릭 수집 (`collect-metrics.sh`) |
+| `videos/` | 첫 트윗 첨부 영상 소스·렌더 결과 (드래프트와 basename 매칭) |
+| `scripts/` | 발행 (`publish-thread.sh`), 폴러 (`watch-and-publish.sh`), 영상 렌더 (`render-video.sh`), 메트릭 (`collect-metrics.sh`) |
 | `.github/` | 콘텐츠 백로그 이슈 템플릿, 머지 시 자동 발행 워크플로 |
 
 ---
@@ -222,17 +223,29 @@ scripts/publish-thread.sh drafts/2026-06-12-topic-ko.md
 
 ### Phase E: Media (Optional)
 
+영상 생성·첨부는 네이밍 컨벤션으로 자동화되어 있다 ([videos/README.md](videos/README.md)):
+
 ```bash
-# Upload video
-xurl media upload video.mp4
-# → Save MEDIA_ID
+# 1. 드래프트와 같은 basename으로 영상 소스 작성 (언어 접미사 제외):
+#    videos/YYYY-MM-DD-<topic>.slides.txt  (또는 .cast / .tape / .mp4)
 
-# Attach to first tweet (script):
+# 2. 렌더 (X 스펙으로 정규화: 720p, 30fps, H.264 yuv420p, ~15s):
+scripts/render-video.sh videos/YYYY-MM-DD-<topic>.slides.txt
+
+# 3. 발행 — watch-and-publish.sh가 매칭되는 mp4를 자동 업로드,
+#    EN 첫 트윗에 첨부 후 같은 media ID를 KO 첫 트윗에 재사용.
+#    영상이 없으면 텍스트만 발행 (optional).
+```
+
+수동 폴백:
+
+```bash
+xurl media upload videos/<topic>.mp4   # → MEDIA_ID 저장
 scripts/publish-thread.sh drafts/<file>-en.md --media-id MEDIA_ID
-
-# Reuse same media-id for the KO thread:
 scripts/publish-thread.sh drafts/<file>-ko.md --media-id MEDIA_ID
 ```
+
+발행 전 safety.md 영상 체크 필수: 프레임에 토큰·시크릿·개인 경로 노출 확인.
 
 ### Phase F: Verification (Checklist)
 

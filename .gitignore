@@ -16,6 +16,10 @@
 *.jpeg
 *.gif
 
+# Exception: thread videos may be versioned if small (videos/README.md)
+!videos/*.mp4
+!videos/*.gif
+
 # OS / editor noise
 .DS_Store
 *.swp
