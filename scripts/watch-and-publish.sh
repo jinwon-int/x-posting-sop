@@ -54,6 +54,13 @@ while IFS= read -r f; do
 done < <(git diff --name-only HEAD origin/main -- 'videos/*.mp4')
 git merge --ff-only origin/main --quiet
 
+# Emergency stop: create .publish-paused (node-local file or committed to
+# main) to halt all auto-publishing; remove it to resume.
+if [[ -f .publish-paused ]]; then
+  echo "Auto-publish paused (.publish-paused present) — remove the file to resume."
+  exit 0
+fi
+
 NEW=()
 while IFS= read -r f; do
   grep -qxF "$f" "$STATE_FILE" || NEW+=("$f")
@@ -61,9 +68,28 @@ done < <(list_drafts)
 
 [[ ${#NEW[@]} -eq 0 ]] && exit 0
 
-if [[ ${#NEW[@]} -gt 2 ]]; then
-  echo "Safety: ${#NEW[@]} unpublished drafts exceed the 2-thread daily cap (safety.md)." >&2
-  printf '  %s\n' "${NEW[@]}" >&2
+# Merge = approval (safety.md). A draft counts as approved only when the
+# commit that ADDED it is a PR merge — squash merges carry "(#N)" in the
+# subject, true merge commits have two parents. Drafts pushed straight to
+# main bypass owner review and are NEVER auto-published; route them through
+# a PR, or append them to the state file manually if handled out of band.
+APPROVED=()
+for f in "${NEW[@]}"; do
+  info=$(git log --diff-filter=A --format='%P%x09%s' -1 -- "$f")
+  parents=${info%%$'\t'*}
+  subject=${info#*$'\t'}
+  if [[ "$subject" =~ \(#[0-9]+\)$ || "$parents" == *" "* ]]; then
+    APPROVED+=("$f")
+  else
+    echo "WARNING: $f reached main without a PR merge (direct push?) — refusing to publish (safety.md)." >&2
+  fi
+done
+
+[[ ${#APPROVED[@]} -eq 0 ]] && exit 0
+
+if [[ ${#APPROVED[@]} -gt 2 ]]; then
+  echo "Safety: ${#APPROVED[@]} unpublished drafts exceed the 2-thread daily cap (safety.md)." >&2
+  printf '  %s\n' "${APPROVED[@]}" >&2
   echo "Publish manually with scripts/publish-thread.sh, then append each to $STATE_FILE." >&2
   exit 1
 fi
@@ -88,7 +114,7 @@ video_for() {
 # (EN-first rule). The EN upload's media id is reused for the KO thread
 # within the same run (X keeps media ids valid ~15 days).
 declare -A MEDIA_CACHE
-for f in "${NEW[@]}"; do
+for f in "${APPROVED[@]}"; do
   b=$(basename "$f" .md)
   topic=${b%-en}; topic=${topic%-ko}
 
