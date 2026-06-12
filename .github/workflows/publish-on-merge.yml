@@ -1,0 +1,58 @@
+# Auto-publish merged drafts.
+#
+# When a PR that adds files under drafts/ is merged, publish those drafts
+# with scripts/publish-thread.sh — merge IS the owner approval (safety.md).
+#
+# DISABLED BY DEFAULT. To enable:
+#   1. Register a self-hosted runner on the node that has xurl authenticated
+#      (the Android/Termux Hermes node).
+#   2. Set the repository variable AUTO_PUBLISH to 'true'
+#      (Settings → Secrets and variables → Actions → Variables).
+#
+# Files are published in name order, so YYYY-MM-DD-topic-en.md naturally
+# goes before YYYY-MM-DD-topic-ko.md (EN-first rule).
+
+name: Auto-publish merged drafts
+
+on:
+  pull_request:
+    types: [closed]
+    paths:
+      - "drafts/**"
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true && vars.AUTO_PUBLISH == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Collect newly added drafts
+        id: drafts
+        run: |
+          FILES=$(git diff --name-only --diff-filter=A \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.merge_commit_sha }}" \
+            -- 'drafts/*.md' | grep -v 'drafts/README.md' | sort || true)
+          if [ -z "$FILES" ]; then
+            echo "No new draft files in this merge — nothing to publish."
+          fi
+          {
+            echo 'files<<EOF'
+            echo "$FILES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish threads
+        if: steps.drafts.outputs.files != ''
+        run: |
+          echo "${{ steps.drafts.outputs.files }}" | while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            echo "::group::Publishing $f"
+            scripts/publish-thread.sh "$f"
+            echo "::endgroup::"
+          done
+          echo "Reminder: run Phase F checklist and update log.md"

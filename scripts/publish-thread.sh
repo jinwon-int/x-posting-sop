@@ -9,11 +9,15 @@
 #
 # Usage:
 #   scripts/publish-thread.sh <thread-file> [--media-id MEDIA_ID] [--delay SECONDS]
+#                             [--dry-run] [--force]
 #
 # Behavior:
 #   - tweet 1 is posted with `xurl post` (with --media-id if given)
 #   - every subsequent tweet replies to the IMMEDIATELY PREVIOUS tweet id
 #   - sleeps DELAY seconds between tweets (default 10) to avoid rate limits
+#   - refuses threads longer than MAX_TWEETS (safety.md cap) unless --force
+#   - --dry-run parses and prints the tweets with character counts without
+#     calling xurl at all — required before first publish of a new format
 #   - prints every created tweet id; keep this output until the thread is
 #     verified (Phase F), so the thread can be deleted in reverse order
 #     if anything went wrong
@@ -23,9 +27,12 @@ set -euo pipefail
 DELAY=10
 MEDIA_ID=""
 THREAD_FILE=""
+DRY_RUN=0
+FORCE=0
+MAX_TWEETS=10
 
 usage() {
-  echo "Usage: $0 <thread-file> [--media-id MEDIA_ID] [--delay SECONDS]" >&2
+  echo "Usage: $0 <thread-file> [--media-id MEDIA_ID] [--delay SECONDS] [--dry-run] [--force]" >&2
   exit 1
 }
 
@@ -33,6 +40,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --media-id) MEDIA_ID="${2:?--media-id requires a value}"; shift 2 ;;
     --delay)    DELAY="${2:?--delay requires a value}"; shift 2 ;;
+    --dry-run)  DRY_RUN=1; shift ;;
+    --force)    FORCE=1; shift ;;
     -h|--help)  usage ;;
     *)          [[ -n "$THREAD_FILE" ]] && usage; THREAD_FILE="$1"; shift ;;
   esac
@@ -40,7 +49,9 @@ done
 
 [[ -n "$THREAD_FILE" ]] || usage
 [[ -f "$THREAD_FILE" ]] || { echo "Error: file not found: $THREAD_FILE" >&2; exit 1; }
-command -v xurl >/dev/null || { echo "Error: xurl not found in PATH" >&2; exit 1; }
+if [[ $DRY_RUN -eq 0 ]]; then
+  command -v xurl >/dev/null || { echo "Error: xurl not found in PATH" >&2; exit 1; }
+fi
 
 # Split the draft into one temp file per tweet, skipping HTML comments.
 SPLIT_DIR=$(mktemp -d)
@@ -56,6 +67,27 @@ awk -v dir="$SPLIT_DIR" '
 TWEET_FILES=("$SPLIT_DIR"/*.txt)
 COUNT=${#TWEET_FILES[@]}
 [[ $COUNT -ge 1 && -s "${TWEET_FILES[0]}" ]] || { echo "Error: no tweets parsed from $THREAD_FILE" >&2; exit 1; }
+
+if [[ $COUNT -gt $MAX_TWEETS && $FORCE -eq 0 ]]; then
+  echo "Error: $COUNT tweets exceeds the safety cap of $MAX_TWEETS (see safety.md)." >&2
+  echo "Split the thread, or re-run with --force after owner approval." >&2
+  exit 1
+fi
+
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "DRY RUN — $COUNT tweets parsed from $THREAD_FILE, nothing will be posted."
+  echo
+  i=0
+  for f in "${TWEET_FILES[@]}"; do
+    i=$((i + 1))
+    TEXT=$(awk 'NF {found=1} found' "$f" | awk '{lines[NR]=$0} NF {last=NR} END {for (j=1; j<=last; j++) print lines[j]}')
+    echo "── tweet $i/$COUNT (${#TEXT} chars) ──"
+    echo "$TEXT"
+    echo
+  done
+  echo "Review against the Phase F checklist and safety.md before publishing."
+  exit 0
+fi
 
 echo "Publishing $COUNT tweets from $THREAD_FILE (delay ${DELAY}s)..."
 echo
