@@ -81,7 +81,9 @@ if [[ $DRY_RUN -eq 1 ]]; then
   for f in "${TWEET_FILES[@]}"; do
     i=$((i + 1))
     TEXT=$(awk 'NF {found=1} found' "$f" | awk '{lines[NR]=$0} NF {last=NR} END {for (j=1; j<=last; j++) print lines[j]}')
-    echo "── tweet $i/$COUNT (${#TEXT} chars) ──"
+    # count characters, not bytes (KO chars are multi-byte in UTF-8)
+    CHARS=$(printf %s "$TEXT" | LC_ALL=C.utf8 wc -m 2>/dev/null || printf %s "$TEXT" | wc -m)
+    echo "── tweet $i/$COUNT ($CHARS chars) ──"
     echo "$TEXT"
     echo
   done
