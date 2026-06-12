@@ -18,4 +18,6 @@
 
 ---
 
-6/6 — The DN42 bankruptcy is not an AI failure. It is a deployment failure. Would you give a summer intern root and a company card? Don’t give those to an agent either. Guardrails beat intelligence. That’s how a liberal-arts VPS fleet survives. #AISecurity #BuildInPublic
+6/6 — The DN42 bankruptcy is not an AI failure. It is a deployment failure. Would you give a summer intern root and a company card? Don't give those to an agent either. Guardrails beat intelligence. That's how a liberal-arts VPS fleet survives.
+
+#BuildInPublic #AgentOrch #DevOps
