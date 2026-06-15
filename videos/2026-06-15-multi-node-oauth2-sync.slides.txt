@@ -1,0 +1,18 @@
+Single Refresher
+gongyung as Canonical
+---
+OAuth2 Race
+Refresh Token Rotation
+2 Nodes = Conflict
+---
+Solution
+1 Refresher + SCP Push
+Peers Consume Only
+---
+Power-Off Recovery
+Stale expiration_time
+xurl Auto-Refresh
+---
+Guardrails Win
+Token Mgmt = Prod Deploy
+No More 401s
