@@ -1,0 +1,14 @@
+Cursor $0.50 vs $11
+22x cheaper, same accuracy
+---
+MCP Servers Exploding
+Headroom 42k stars, 95% compression
+---
+Workhorse Models Win
+Fast iteration > frontier hype
+---
+Bounded Autonomy Fleet
+11 VPS, one Android conductor
+---
+Guardrails > Models
+MCP + rules scale delegation
