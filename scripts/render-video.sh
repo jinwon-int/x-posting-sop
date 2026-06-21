@@ -67,8 +67,12 @@ case "$name" in
     : > "$TMP/concat.txt"
     for s in "${SLIDE_FILES[@]}"; do
       seg="$TMP/seg-$(basename "$s" .txt).mp4"
+      # expansion=none: render slide text literally so characters like '%'
+      # (e.g. "0-20% TRUST GAP") are not parsed as drawtext expansion/strftime
+      # tokens. Some ffmpeg builds fail hard on that with "Stray %" (this was
+      # the PR #29 render-check failure). textfile= already handles ':'/'\'.
       ffmpeg -y -v error -f lavfi -i "color=c=0x0d1117:s=1280x720:d=$DUR,fps=30" \
-        -vf "drawtext=textfile='$s':font='${FONT:-DejaVu Sans}':fontcolor=0xe6edf3:fontsize=40:line_spacing=14:x=(w-text_w)/2:y=(h-text_h)/2" \
+        -vf "drawtext=textfile='$s':expansion=none:font='${FONT:-DejaVu Sans}':fontcolor=0xe6edf3:fontsize=40:line_spacing=14:x=(w-text_w)/2:y=(h-text_h)/2" \
         -c:v libx264 -pix_fmt yuv420p -an "$seg"
       echo "file '$seg'" >> "$TMP/concat.txt"
     done
