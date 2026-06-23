@@ -63,35 +63,72 @@ jobs:
           sudo install -m 755 /tmp/agg /usr/local/bin/agg
 
       - name: Render
+        id: render
         if: steps.sources.outputs.files != ''
         run: |
-          echo "${{ steps.sources.outputs.files }}" | while IFS= read -r f; do
+          set +e
+          rendered_files=""
+          failed=0
+          while IFS= read -r f; do
             [ -n "$f" ] || continue
-            scripts/render-video.sh "$f"
-          done
+            echo "::group::Render $f"
+            out="videos/$(basename "$f")"
+            case "$out" in
+              *.slides.txt) out="${out%.slides.txt}.mp4" ;;
+              *.cast) out="${out%.cast}.mp4" ;;
+              *.tape) out="${out%.tape}.mp4" ;;
+              *.mov) out="${out%.mov}.mp4" ;;
+              *.gif) out="${out%.gif}.mp4" ;;
+            esac
+            if scripts/render-video.sh "$f" "$out"; then
+              rendered_files="${rendered_files}${out}\n"
+            else
+              rc=$?
+              echo "::error file=$f::Video preview render failed for $f (exit $rc). See the grouped log above for source type, step, and tool error."
+              failed=1
+            fi
+            echo "::endgroup::"
+          done <<'EOF'
+          ${{ steps.sources.outputs.files }}
+          EOF
+          {
+            echo 'files<<EOF'
+            printf '%b' "$rendered_files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          if [ -z "$rendered_files" ]; then
+            echo "::error::No video previews were rendered. At least one changed source must render before artifact/comment steps can run."
+            exit 1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::warning::One or more changed video sources failed; uploading the successfully rendered previews only."
+          fi
 
       - name: Upload previews
-        if: steps.sources.outputs.files != ''
+        if: steps.render.outputs.files != ''
         uses: actions/upload-artifact@v4
         with:
           name: video-previews
-          path: videos/*.mp4
+          path: |
+            ${{ steps.render.outputs.files }}
           if-no-files-found: error
 
       - name: Comment on PR
-        if: steps.sources.outputs.files != ''
+        if: steps.render.outputs.files != ''
         uses: actions/github-script@v7
         with:
           script: |
             const marker = '<!-- video-preview-comment -->';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const files = `${{ steps.sources.outputs.files }}`.split('\n').filter(Boolean);
+            const files = `${{ steps.render.outputs.files }}`.split('\n').filter(Boolean);
+            const sources = `${{ steps.sources.outputs.files }}`.split('\n').filter(Boolean);
             const body = [
               marker,
               '## 🎬 Video preview rendered',
               '',
               ...files.map(f => `- \`${f}\``),
               '',
+              `Changed sources checked: ${sources.map(f => `\`${f}\``).join(', ')}`,
               `X-spec mp4 산출물: [workflow artifacts](${runUrl}) → \`video-previews\``,
               '',
               '머지 전에 다운로드해서 끝까지 재생 확인 (safety.md: 프레임 내 토큰/경로 노출 체크).',
