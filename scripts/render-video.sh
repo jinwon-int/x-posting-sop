@@ -30,6 +30,14 @@ SRC="${1:?Usage: $0 <source> [output.mp4]}"
 command -v ffmpeg >/dev/null || { echo "Error: ffmpeg not found in PATH" >&2; exit 1; }
 command -v ffprobe >/dev/null || { echo "Error: ffprobe not found in PATH" >&2; exit 1; }
 
+SOURCE_TYPE="unknown"
+RENDER_STEP="initialization"
+on_render_error() {
+  local rc=$?
+  echo "render-video failed: source=$SRC type=$SOURCE_TYPE step=$RENDER_STEP rc=$rc" >&2
+}
+trap on_render_error ERR
+
 name=$(basename "$SRC")
 base=$name
 for ext in .slides.txt .cast .tape .mp4 .mov .gif; do
@@ -43,20 +51,27 @@ trap 'rm -rf "$TMP"' EXIT
 
 case "$name" in
   *.cast)
+    SOURCE_TYPE="cast"
     command -v agg >/dev/null || { echo "Error: .cast source needs agg (asciinema gif generator)" >&2; exit 1; }
+    RENDER_STEP="agg"
     agg "$SRC" "$TMP/raw.gif"
     RAW="$TMP/raw.gif"
     ;;
   *.tape)
+    SOURCE_TYPE="tape"
     command -v vhs >/dev/null || { echo "Error: .tape source needs vhs (charmbracelet)" >&2; exit 1; }
+    RENDER_STEP="parse tape Output"
     TAPE_OUT=$(grep -oE '^Output[[:space:]]+[^[:space:]]+\.(mp4|gif)' "$SRC" | awk '{print $2}' | head -1)
     [[ -n "$TAPE_OUT" ]] || { echo "Error: tape must declare an Output ending in .mp4 or .gif" >&2; exit 1; }
+    RENDER_STEP="vhs"
     vhs "$SRC"
     [[ -f "$TAPE_OUT" ]] || { echo "Error: vhs did not produce $TAPE_OUT" >&2; exit 1; }
     RAW="$TAPE_OUT"
     ;;
   *.slides.txt)
+    SOURCE_TYPE="slides"
     mkdir -p "$TMP/slides"
+    RENDER_STEP="parse slides"
     awk -v dir="$TMP/slides" '
       /^---[[:space:]]*$/ { n++; next }
       { print > (dir "/" sprintf("%03d", n) ".txt") }
@@ -71,15 +86,18 @@ case "$name" in
       # (e.g. "0-20% TRUST GAP") are not parsed as drawtext expansion/strftime
       # tokens. Some ffmpeg builds fail hard on that with "Stray %" (this was
       # the PR #29 render-check failure). textfile= already handles ':'/'\'.
+      RENDER_STEP="render slide $(basename "$s")"
       ffmpeg -y -v error -f lavfi -i "color=c=0x0d1117:s=1280x720:d=$DUR,fps=30" \
         -vf "drawtext=textfile='$s':expansion=none:font='${FONT:-DejaVu Sans}':fontcolor=0xe6edf3:fontsize=40:line_spacing=14:x=(w-text_w)/2:y=(h-text_h)/2" \
         -c:v libx264 -pix_fmt yuv420p -an "$seg"
       echo "file '$seg'" >> "$TMP/concat.txt"
     done
+    RENDER_STEP="concat slides"
     ffmpeg -y -v error -f concat -safe 0 -i "$TMP/concat.txt" -c copy "$TMP/raw.mp4"
     RAW="$TMP/raw.mp4"
     ;;
   *.mp4|*.mov|*.gif)
+    SOURCE_TYPE="footage"
     RAW="$SRC"
     ;;
   *)
@@ -96,10 +114,12 @@ if [[ "$RAW" -ef "$OUT" ]]; then
   mv "$RAW" "$TMP/inplace-raw.mp4"
   RAW="$TMP/inplace-raw.mp4"
 fi
+RENDER_STEP="normalize to X upload spec"
 ffmpeg -y -v error -i "$RAW" \
   -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,fps=30,format=yuv420p" \
   -c:v libx264 -preset medium -crf 23 -movflags +faststart -an "$OUT"
 
+RENDER_STEP="probe output"
 DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT")
 DUR_INT=${DURATION%.*}
 SIZE=$(du -h "$OUT" | cut -f1)
