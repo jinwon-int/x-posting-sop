@@ -30,6 +30,7 @@ THREAD_FILE=""
 DRY_RUN=0
 FORCE=0
 MAX_TWEETS=10
+MAX_CHARS=280
 
 usage() {
   echo "Usage: $0 <thread-file> [--media-id MEDIA_ID] [--delay SECONDS] [--dry-run] [--force]" >&2
@@ -74,15 +75,53 @@ if [[ $COUNT -gt $MAX_TWEETS && $FORCE -eq 0 ]]; then
   exit 1
 fi
 
+trim_tweet_file() {
+  awk 'NF {found=1} found' "$1" | awk '{lines[NR]=$0} NF {last=NR} END {for (j=1; j<=last; j++) print lines[j]}'
+}
+
+x_weighted_count() {
+  python3 -c '
+import re, sys
+text = sys.stdin.read()
+url_re = re.compile(r"https?://\S+")
+total = 0
+pos = 0
+for match in url_re.finditer(text):
+    segment = text[pos:match.start()]
+    total += sum(1 if ord(ch) <= 0x7F else 2 for ch in segment)
+    total += 23
+    pos = match.end()
+total += sum(1 if ord(ch) <= 0x7F else 2 for ch in text[pos:])
+print(total)
+'
+}
+
+validate_tweet_lengths() {
+  local i=0 f text chars failed=0
+  for f in "${TWEET_FILES[@]}"; do
+    i=$((i + 1))
+    text=$(trim_tweet_file "$f")
+    chars=$(printf %s "$text" | x_weighted_count)
+    if [[ "$chars" -gt "$MAX_CHARS" ]]; then
+      echo "Error: tweet $i exceeds X character limit of $MAX_CHARS ($chars chars):" >&2
+      echo "$text" >&2
+      failed=1
+    fi
+  done
+  [[ $failed -eq 0 ]]
+}
+
+validate_tweet_lengths
+
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "DRY RUN — $COUNT tweets parsed from $THREAD_FILE, nothing will be posted."
   echo
   i=0
   for f in "${TWEET_FILES[@]}"; do
     i=$((i + 1))
-    TEXT=$(awk 'NF {found=1} found' "$f" | awk '{lines[NR]=$0} NF {last=NR} END {for (j=1; j<=last; j++) print lines[j]}')
-    # count characters, not bytes (KO chars are multi-byte in UTF-8)
-    CHARS=$(printf %s "$TEXT" | LC_ALL=C.utf8 wc -m 2>/dev/null || printf %s "$TEXT" | wc -m)
+    TEXT=$(trim_tweet_file "$f")
+    # approximate X weighted length: ASCII counts 1, non-ASCII counts 2, URLs count 23
+    CHARS=$(printf %s "$TEXT" | x_weighted_count)
     echo "── tweet $i/$COUNT ($CHARS chars) ──"
     echo "$TEXT"
     echo
@@ -100,7 +139,7 @@ i=0
 for f in "${TWEET_FILES[@]}"; do
   i=$((i + 1))
   # strip leading/trailing blank lines but keep internal line breaks
-  TEXT=$(awk 'NF {found=1} found' "$f" | awk '{lines[NR]=$0} NF {last=NR} END {for (j=1; j<=last; j++) print lines[j]}')
+  TEXT=$(trim_tweet_file "$f")
   [[ -n "$TEXT" ]] || { echo "Error: tweet $i is empty — aborting before posting it" >&2; exit 1; }
 
   if [[ -z "$PREV_ID" ]]; then

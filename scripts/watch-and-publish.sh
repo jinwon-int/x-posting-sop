@@ -140,7 +140,7 @@ for f in "${APPROVED[@]}"; do
   VIDEO=$(video_for "$topic") || { echo "Error: video render failed for $topic — not publishing." >&2; exit 1; }
   if [[ -n "$VIDEO" ]]; then
     if [[ -z "${MEDIA_CACHE[$topic]:-}" ]]; then
-      UP=$(xurl media upload "$VIDEO")
+      UP=$(xurl media upload --auth oauth1 "$VIDEO")
       MID=$(grep -oE '[0-9]{15,}' <<<"$UP" | head -1) || true
       if [[ -z "$MID" ]]; then
         echo "Error: could not parse media id from upload output — not publishing:" >&2
