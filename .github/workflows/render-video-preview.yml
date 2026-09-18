@@ -9,6 +9,7 @@
 name: Render video preview
 
 on:
+  merge_group:
   pull_request:
     paths:
       - "videos/**"
