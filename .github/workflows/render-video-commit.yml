@@ -69,9 +69,16 @@ jobs:
 
       - name: Render and commit
         if: steps.missing.outputs.files != ''
+        env:
+          MISSING_FILES: ${{ steps.missing.outputs.files }}
         run: |
-          echo "${{ steps.missing.outputs.files }}" | while IFS= read -r f; do
+          printf '%s\n' "$MISSING_FILES" | while IFS= read -r f; do
             [ -n "$f" ] || continue
+            if ! printf '%s\n' "$f" | grep -Eq '^videos/[A-Za-z0-9._-]+\.(slides\.txt|cast|tape)$'; then
+              echo "::error::Rejected video source path (allowed: ^videos/[A-Za-z0-9._-]+\\.(slides\\.txt|cast|tape)\$)"
+              printf 'rejected: %q\n' "$f"
+              exit 1
+            fi
             scripts/render-video.sh "$f"
           done
           if [ -n "$(git status --porcelain videos)" ]; then

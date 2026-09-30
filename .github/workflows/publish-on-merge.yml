@@ -11,6 +11,19 @@
 #
 # Files are published in name order, so YYYY-MM-DD-topic-en.md naturally
 # goes before YYYY-MM-DD-topic-ko.md (EN-first rule).
+#
+# SECURITY (audit 2026-09-30) — this repo is PUBLIC and this job runs on a
+# self-hosted runner, because publishing needs the node-local xurl/X session
+# (GitHub-hosted runners do not have it and must not be given it).
+#   - Only same-repo PRs may run it: fork-originated PRs are rejected by the
+#     job-level `if:` guard below, so fork code never reaches the runner.
+#   - Before enabling, put the self-hosted runner in a runner group that is
+#     restricted to THIS repository only (Settings → Actions → Runner groups),
+#     and do not share it with any other repo/workflow.
+#   - GITHUB_TOKEN is read-only (`permissions: contents: read`); publishing
+#     uses only the node-local xurl credentials.
+#   - Draft paths are validated against a strict allowlist before use and
+#     every expression value reaches the shell via env, never inline.
 
 name: Auto-publish merged drafts
 
@@ -20,23 +33,47 @@ on:
     paths:
       - "drafts/**"
 
+permissions:
+  contents: read
+
 jobs:
   publish:
-    if: github.event.pull_request.merged == true && vars.AUTO_PUBLISH == 'true'
+    if: >-
+      github.event.pull_request.merged == true &&
+      vars.AUTO_PUBLISH == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Collect newly added drafts
         id: drafts
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           FILES=$(git diff --name-only --diff-filter=A \
-            "${{ github.event.pull_request.base.sha }}" \
-            "${{ github.event.pull_request.merge_commit_sha }}" \
+            "$BASE_SHA" \
+            "$MERGE_SHA" \
             -- 'drafts/*.md' | grep -v 'drafts/README.md' | sort || true)
+          # Fail closed: every path must match the strict allowlist before
+          # anything is published (no partial publish on a bad name).
+          rejected=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if ! printf '%s\n' "$f" | grep -Eq '^drafts/[A-Za-z0-9._-]+\.md$'; then
+              echo "::error::Rejected draft path (allowed: ^drafts/[A-Za-z0-9._-]+\\.md\$)"
+              printf 'rejected: %q\n' "$f"
+              rejected=1
+            fi
+          done <<< "$FILES"
+          if [ "$rejected" -ne 0 ]; then
+            exit 1
+          fi
           if [ -z "$FILES" ]; then
             echo "No new draft files in this merge — nothing to publish."
           fi
@@ -48,8 +85,10 @@ jobs:
 
       - name: Publish threads
         if: steps.drafts.outputs.files != ''
+        env:
+          DRAFT_FILES: ${{ steps.drafts.outputs.files }}
         run: |
-          echo "${{ steps.drafts.outputs.files }}" | while IFS= read -r f; do
+          printf '%s\n' "$DRAFT_FILES" | while IFS= read -r f; do
             [ -n "$f" ] || continue
             echo "::group::Publishing $f"
             scripts/publish-thread.sh "$f"
