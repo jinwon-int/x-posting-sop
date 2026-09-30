@@ -1,0 +1,47 @@
+name: workflow-lint
+
+# Static validation of GitHub Actions workflows (actionlint + shellcheck).
+# Added by the 2026-09-30 security audit so workflow changes always produce
+# an exact-head check (the other workflows are path-filtered to drafts/videos).
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install actionlint (pinned + sha256 verified)
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$tarball" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" actionlint
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          command -v shellcheck && shellcheck --version | head -2 || true
+          "$RUNNER_TEMP/actionlint" -color
