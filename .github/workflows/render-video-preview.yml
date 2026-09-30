@@ -28,11 +28,27 @@ jobs:
 
       - name: Detect changed video sources
         id: sources
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           FILES=$(git diff --name-only --diff-filter=AM \
-            "${{ github.event.pull_request.base.sha }}" HEAD \
+            "$BASE_SHA" HEAD \
             -- 'videos/*.slides.txt' 'videos/*.cast' 'videos/*.tape' | sort -u)
           echo "Changed sources:"; echo "$FILES"
+          # Fail closed on PR-controlled file names outside the strict
+          # allowlist (they later reach shell, artifact paths and a PR comment).
+          rejected=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if ! printf '%s\n' "$f" | grep -Eq '^videos/[A-Za-z0-9._-]+\.(slides\.txt|cast|tape)$'; then
+              echo "::error::Rejected video source path (allowed: ^videos/[A-Za-z0-9._-]+\\.(slides\\.txt|cast|tape)\$)"
+              printf 'rejected: %q\n' "$f"
+              rejected=1
+            fi
+          done <<< "$FILES"
+          if [ "$rejected" -ne 0 ]; then
+            exit 1
+          fi
           {
             echo 'files<<EOF'
             echo "$FILES"
@@ -66,6 +82,8 @@ jobs:
       - name: Render
         id: render
         if: steps.sources.outputs.files != ''
+        env:
+          SOURCE_FILES: ${{ steps.sources.outputs.files }}
         run: |
           set +e
           rendered_files=""
@@ -89,9 +107,7 @@ jobs:
               failed=1
             fi
             echo "::endgroup::"
-          done <<'EOF'
-          ${{ steps.sources.outputs.files }}
-          EOF
+          done <<< "$SOURCE_FILES"
           {
             echo 'files<<EOF'
             printf '%b' "$rendered_files"
@@ -117,12 +133,15 @@ jobs:
       - name: Comment on PR
         if: steps.render.outputs.files != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RENDERED_FILES: ${{ steps.render.outputs.files }}
+          SOURCE_FILES: ${{ steps.sources.outputs.files }}
         with:
           script: |
             const marker = '<!-- video-preview-comment -->';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const files = `${{ steps.render.outputs.files }}`.split('\n').filter(Boolean);
-            const sources = `${{ steps.sources.outputs.files }}`.split('\n').filter(Boolean);
+            const files = (process.env.RENDERED_FILES || '').split('\n').filter(Boolean);
+            const sources = (process.env.SOURCE_FILES || '').split('\n').filter(Boolean);
             const body = [
               marker,
               '## 🎬 Video preview rendered',
