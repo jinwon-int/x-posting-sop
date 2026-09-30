@@ -43,5 +43,5 @@ jobs:
       - name: Run actionlint
         run: |
           set -euo pipefail
-          command -v shellcheck && shellcheck --version | head -2 || true
+          if command -v shellcheck >/dev/null; then shellcheck --version | head -2; fi
           "$RUNNER_TEMP/actionlint" -color
