@@ -1,13 +1,23 @@
-# Render missing videos on main and commit the mp4s back.
+# Render missing videos on main and propose the mp4s back via a PR.
 #
 # After a draft PR with a video source merges, this renders any source
 # (.slides.txt / .cast / .tape) that has no matching videos/<base>.mp4 and
-# commits the result to main. The node's poller (watch-and-publish.sh)
-# prefers an existing mp4 over rendering locally, so the Termux node never
-# needs vhs/agg — it just pulls the CI-rendered file and publishes.
+# pushes the result to the fixed branch automation/render-videos, then opens
+# (or updates) a PR into main. The node's poller (watch-and-publish.sh)
+# prefers an existing mp4 on main over rendering locally, so once that PR
+# merges the Termux node never needs vhs/agg.
 #
-# Loop guard: the bot commit only adds mp4s; the retriggered run finds no
-# missing sources and exits without committing.
+# main is never pushed directly: the default-branch ruleset (PR + 1 approval
+# + merge queue) rejected the old direct push since 2026-06-12 (#42).
+# If Actions may not create PRs in this repo (the repo setting is off by
+# design: it would also let Actions approve PRs), the run leaves a warning
+# and a compare link instead; a maintainer opens the PR from it.
+#
+# The branch is rebuilt from main on every run and force-pushed, so it always
+# holds exactly the renders main is missing. Do not push edits to it by hand.
+#
+# Loop guard: the render PR only adds mp4s; the run its merge triggers finds
+# no missing sources and exits without pushing.
 
 name: Render and commit videos
 
@@ -19,6 +29,11 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: render-video-commit
+  cancel-in-progress: false
 
 jobs:
   render:
@@ -67,7 +82,7 @@ jobs:
           gh release download -R asciinema/agg -p '*x86_64-unknown-linux-gnu' -O /tmp/agg
           sudo install -m 755 /tmp/agg /usr/local/bin/agg
 
-      - name: Render and commit
+      - name: Render
         if: steps.missing.outputs.files != ''
         env:
           MISSING_FILES: ${{ steps.missing.outputs.files }}
@@ -81,10 +96,40 @@ jobs:
             fi
             scripts/render-video.sh "$f"
           done
-          if [ -n "$(git status --porcelain videos)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add videos/*.mp4
-            git commit -m "Render videos for publish (CI)"
-            git push
+
+      - name: Push render branch and open PR
+        if: steps.missing.outputs.files != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RENDER_BRANCH: automation/render-videos
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- 'videos/*.mp4')" ]; then
+            echo "No new mp4 rendered; nothing to propose."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$RENDER_BRANCH"
+          git add -- videos/*.mp4
+          git commit -m "Render videos for publish (CI)"
+          git push --force origin "HEAD:refs/heads/$RENDER_BRANCH"
+
+          compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$RENDER_BRANCH?expand=1"
+          existing=$(gh pr list --base main --head "$RENDER_BRANCH" --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            echo "Updated the open render PR: $existing"
+            echo "Updated render PR: $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          body=$(printf 'CI-rendered mp4s for video sources on main that had none.\n\nRun: %s\n\nReview before merging: play each video to the end (safety.md: no tokens/paths in frame). Merging lets the node poller use these files instead of rendering locally.\n' "$RUN_URL")
+          if pr_url=$(gh pr create --base main --head "$RENDER_BRANCH" \
+              --title "Render videos for publish (CI)" --body "$body" 2>/tmp/pr-create.err); then
+            echo "Opened render PR: $pr_url"
+            echo "Opened render PR: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "gh pr create failed: $(head -c 300 /tmp/pr-create.err)"
+            echo "::warning::Rendered mp4s are on $RENDER_BRANCH but no PR was opened (Actions may not create PRs here). Open it from: $compare"
+            echo "Render branch pushed, PR not opened. Open it from: $compare" >> "$GITHUB_STEP_SUMMARY"
           fi
